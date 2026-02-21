@@ -1,0 +1,42 @@
+dataset_version: ds_v0_btceth_daily_binance_closeutc
+
+inputs:
+  returns_path: data/processed/${dataset_version}/returns.csv
+  splits_path: data/processed/${dataset_version}/splits.json
+  u_series_path: data/processed/${dataset_version}/pits/u_series.csv
+  pit_metrics_path: data/processed/${dataset_version}/pits/pit_metrics.json
+  regimes_path: data/processed/${dataset_version}/taildep/j4_calm_stress/regimes.csv
+
+refit_every: 20
+seed: 123
+
+stress:
+  type: RV
+  on_asset: BTC
+  window: 30
+  stress_q: 0.90
+  calm_q: 0.50
+  zscore: MAD
+
+tcopula:
+  nu_grid: [3,4,5,7,10,15,20,30,50]
+  nu_bounds: [2.1, 60.0]
+  rho_clamp: 1.0e-6
+
+gating:
+  threshold:
+    enabled: true
+    min_regime_n: 200
+  logistic:
+    enabled: true
+    inner_val_days: 252
+    a_grid: [-3,-2,-1,0,1,2,3]
+    b_grid: [-5,-3,-2,-1,0,1,2,3,5]
+
+dm_test:
+  enabled: true
+  nw_lag_rule: "4*(n/100)^(2/9)"
+
+reporting:
+  figures: true
+  rolling_window: 63

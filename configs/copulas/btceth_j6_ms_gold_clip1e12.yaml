@@ -1,0 +1,40 @@
+dataset_version: ds_v0_btceth_daily_binance_closeutc
+out_tag: j6_ms2_refit40
+
+inputs:
+  returns_path: data/processed/${dataset_version}/returns.csv
+  u_series_path: data/processed/${dataset_version}/pit/u_series.csv
+
+seed: 123
+refit_every: 40
+
+u_clip_eps: 1e-12
+
+stress:
+  type: RV
+  on_asset: BTC
+  window: 30
+  stress_q: 0.9
+  calm_q: 0.5
+
+tcopula:
+  nu_grid: [3, 4, 5, 7, 10, 15, 20, 30, 50]
+  nu_bounds: [2.1, 60.0]
+  rho_clamp: 1e-6
+
+ms_model:
+  K: 2
+  ordering_key: rho
+  min_state_eff_n: 150
+  min_state_eff_n_t: 120
+  em:
+    init_A: [[0.98, 0.02], [0.02, 0.98]]
+    max_iter: 50
+    tol: 1e-6
+
+dm_test:
+  enabled: true
+  nw_lag_rule: "4*(n/100)^(2/9)"
+
+reporting:
+  figures: true

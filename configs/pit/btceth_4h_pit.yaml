@@ -1,0 +1,17 @@
+pit:
+  dataset_version: ds_v0_btceth_4h_binance_closeutc
+  method: ecdf_expanding_midrank
+  epsilon: 1e-6
+  min_history: 500
+  start_at: first_oos
+  output_dirname: pits
+  assets: [BTC, ETH]
+  inputs:
+    returns_path: data/processed/${pit.dataset_version}/returns_pit_ready.csv
+    splits_path:  data/processed/${pit.dataset_version}/splits.json
+
+diagnostics:
+  hist_bins: 40
+  acf_lags: [1,5,10,20]
+  ks_test: true
+  make_timeseries_plots: true

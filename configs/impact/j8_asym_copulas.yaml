@@ -1,0 +1,24 @@
+dataset_version: ds_v0_btceth_daily_binance_closeutc
+
+inputs:
+  returns_path: data/processed/${dataset_version}/returns.csv
+
+pair:
+  asset1: BTC
+  asset2: ETH
+
+alphas: [0.95, 0.99]
+n_scenarios: 20000
+seed: 123
+
+refit_every: 40
+min_train: 250
+
+stress:
+  window: 30
+  calm_q: 0.50
+  stress_q: 0.90
+
+rho_clamp: 1e-6
+
+out_name: j8_asym_btceth_daily_refit40_N20000

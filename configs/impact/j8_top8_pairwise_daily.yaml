@@ -1,0 +1,53 @@
+# configs/impact/j8_top8_pairwise_daily.yaml
+
+# --- compat runner (celui qui crash) ---
+dataset_dir: data/processed/ds_v0_top8_daily_binance_closeutc
+out_root: data/processed/ds_v0_top8_daily_binance_closeutc/impact/j8_top8_pairwise
+run_name: j8_top8_pairwise_daily_refit40_N10000_ms_spot6
+
+# --- compat “nouveau style” (si tu as aussi une variante qui lit dataset_version/inputs) ---
+dataset_version: ds_v0_top8_daily_binance_closeutc
+inputs:
+  returns_path: data/processed/${dataset_version}/returns.csv
+
+# colonnes returns.csv (doivent matcher exactement)
+assets: [BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, XRPUSDT, ADAUSDT, DOGEUSDT, TRXUSDT]
+returns_columns: [BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, XRPUSDT, ADAUSDT, DOGEUSDT, TRXUSDT]
+
+# modèles partout (stable)
+models: [indep, static_gauss, static_t, thr_gauss, thr_t]
+baseline_model: thr_t
+focus_model: thr_t
+
+alphas: [0.95, 0.99]
+n_scenarios: 10000
+seed: 123
+
+# daily
+refit_every: 40
+
+stress:
+  rv_window: 30
+  calm_q: 0.50
+  stress_q: 0.90
+
+# MS spot-check (4–6 paires)
+ms_models: [ms_gauss, ms_t]
+ms_spot_pairs:
+  - [BTCUSDT, ETHUSDT]
+  - [BTCUSDT, SOLUSDT]
+  - [ETHUSDT, SOLUSDT]
+  - [BTCUSDT, BNBUSDT]
+  - [ETHUSDT, BNBUSDT]
+  - [BNBUSDT, SOLUSDT]
+
+ms_model:
+  K: 2
+  ordering_key: rho
+  init_A: [[0.98, 0.02], [0.02, 0.98]]
+  max_iter: 50
+  tol: 1e-6
+  min_state_eff_n: 150
+  min_state_eff_n_t: 120
+  min_train: 250
+  seed: 123

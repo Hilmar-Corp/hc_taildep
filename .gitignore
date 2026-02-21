@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
+
+# Build / packaging
+dist/
+build/
+*.egg-info/
+
+# Large data artifacts (keep specs/manifests, not raw runs by default)
+data/processed/
+data/raw/
+runs/
+artifacts/
+paper/out/**/figures/
+paper/out/**/tables/
+
+# But keep the lock+manifest+summary even if paper/out is mostly ignored
+!paper/out/**/manifest.json
+!paper/out/**/paper_summary.md
+
+# logs
+*.log

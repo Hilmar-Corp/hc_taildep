@@ -1,0 +1,21 @@
+pit:
+  dataset_version: ds_v0_btceth_daily_binance_closeutc
+
+  # Contrat J2
+  method: ecdf_expanding_midrank
+  epsilon: 1.0e-6
+
+  # Publication-grade: PIT uniquement à partir de first_oos
+  start_at: first_oos   # {first_oos | train_start}
+  min_history: 730      # aligné J1 (min_train_days)
+
+  # Outputs
+  output_dirname: pits
+  prefer_parquet: false   # on reste CSV comme J1 (stable + hash bytes)
+  csv_float_format: "%.10g"
+
+diagnostics:
+  hist_bins: 40
+  acf_lags: [1, 5, 10, 20]
+  ks_test: true
+  make_timeseries_plots: true

@@ -1,0 +1,40 @@
+dataset_version: ds_v0_btceth_daily_binance_closeutc
+
+inputs:
+  returns_path: data/processed/${dataset_version}/returns.csv
+  copula_markov_base_dir: data/processed/${dataset_version}/copulas/markov
+
+# source J6 run
+copula_run_name: j6_ms2_gold_refit40_mineffT120
+
+# output
+out_name: j7_var_es_gold_refit40_mineffT120_N20000
+
+seed: 123
+refit_every: 40
+
+n_scenarios: 20000
+alphas: [0.95, 0.99]
+weights: [0.5, 0.5]  # BTC, ETH
+
+# used for sampling clamps
+rho_clamp: 1e-6
+
+stress:
+  window: 30
+  stress_q: 0.90
+  calm_q: 0.50
+
+models_to_compare:
+  - indep
+  - static_gauss
+  - static_t
+  - thr_gauss
+  - thr_t
+  - ms_gauss
+  - ms_t
+
+baseline_model: thr_t
+
+reporting:
+  figures: true

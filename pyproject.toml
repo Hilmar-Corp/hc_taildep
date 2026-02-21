@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hc-taildep"
+version = "0.0.1"
+description = "hc_taildep — reproducible tail dependence research pipeline (bootstrap)"
+requires-python = ">=3.11"
+dependencies = [
+  "pyyaml>=6.0.1",
+  "pandas>=2.2.0",
+  "numpy>=1.26.0",
+  "requests>=2.32.0",
+  "matplotlib>=3.9.0",
+  "scipy>=1.13.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

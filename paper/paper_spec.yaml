@@ -1,0 +1,47 @@
+# paper/paper_spec.yaml
+# J9 — camera-ready pack builder spec
+# Edit the run paths below to match your repo outputs.
+
+paper_id: hc_taildep_v0_camera_ready
+
+outputs:
+  out_dir: paper/out/${paper_id}
+  formats: ["png"]          # ["png","pdf"] if you want both
+  dpi: 200
+  fig_width_in: 7.0
+  fig_height_in: 4.0
+  float_fmt: "%.6g"
+  table_round: 6
+  fail_on_missing: true
+
+style:
+  # keep minimal + deterministic
+  timezone: UTC
+
+core:
+  # J6 Markov copula run (must contain: predictions.csv, tables/scores_summary.csv, tables/dm_summary.csv)
+  j6:
+    out_dir: data/processed/ds_v0_btceth_4h_binance_closeutc/copulas/markov/j6_ms2_gold_4h_refit240_mineffT120
+
+  # J7 impact VaR/ES run (must contain: var_es_predictions.csv, tables/var_es_summary.csv, tables/coverage_tests.csv)
+  j7:
+    out_dir: data/processed/ds_v0_btceth_4h_binance_closeutc/impact/j7_var_es/j7_var_es_4h_sensitivity_N20000
+
+annex:
+  # J8 top-8 heatmaps (must contain: tables/heatmap_*.csv)
+  j8_top8:
+    enabled: true
+    out_dir: data/processed/ds_v0_top8_daily_binance_closeutc/impact/j8_top8_pairwise/j8_top8_pairwise_daily_refit40_N10000_ms_spot6
+
+  # J8 asym copulas (must contain: tables/tail_dependence_mc.csv)
+  j8_asym:
+    enabled: true
+    out_dir: data/processed/ds_v0_btceth_daily_binance_closeutc/impact/j8_asym_copulas/j8_asym_btceth_daily_refit40_N20000
+
+checks:
+  required_files:
+    # minimal “institution-grade” expectation inside each run dir
+    - config.resolved.yaml
+    - provenance.json
+  optional_files:
+    - report.md

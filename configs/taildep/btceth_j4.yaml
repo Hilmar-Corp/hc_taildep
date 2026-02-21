@@ -1,0 +1,42 @@
+dataset_version: ds_v0_btceth_daily_binance_closeutc
+
+inputs:
+  returns_path: data/processed/${dataset_version}/returns.csv
+  splits_path: data/processed/${dataset_version}/splits.json
+  u_series_path: data/processed/${dataset_version}/pits/u_series.csv
+  pit_metrics_path: data/processed/${dataset_version}/pits/pit_metrics.json
+
+window:
+  start_at: first_oos
+  end_at: last_oos
+
+stress_defs:
+  rv:
+    enabled: true
+    on_asset: BTC
+    window: 30
+    stress_q: 0.90
+    calm_q: 0.50
+  joint_downside:
+    enabled: true
+    alpha: 0.10
+
+t_copula_fit:
+  nu_grid: [3,4,5,7,10,15,20,30,50]
+  nu_bounds: [2.1, 60.0]
+  rho_clamp: 1.0e-6
+
+tail_lambda:
+  method: tcopula_closed_form
+  empirical_qs: [0.05, 0.10]
+
+bootstrap:
+  enabled: true
+  B: 1000
+  block_len: 10
+  seed: 123
+
+reporting:
+  make_figures: true
+  rv_plot: true
+  bootstrap_hist: true

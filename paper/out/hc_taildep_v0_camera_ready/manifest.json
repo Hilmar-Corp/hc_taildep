@@ -1,0 +1,152 @@
+{
+  "created_utc": "2026-02-21T17:22:20+00:00",
+  "git": {
+    "branch": null,
+    "commit": null,
+    "dirty": null
+  },
+  "manifest_sha256": "9be6a83c734b879ab1ef2b6cd60f794c48b013077f2811db630158f5897fc66e",
+  "outputs": [
+    {
+      "path": "paper/out/hc_taildep_v0_camera_ready/figures/fig_A1_heatmap_delta_es99_stress.png",
+      "sha256": "0f53ac2a51ed12bfb8e9afc7bb4dd70a3bb4203b106972efb21c06b6f67bb5d8"
+    },
+    {
+      "path": "paper/out/hc_taildep_v0_camera_ready/figures/fig_A2_heatmap_ratio_stress_calm_es99.png",
+      "sha256": "4cfd5d3f53e022b866e43de2d8a4a60045f7f72155d76981266871bc00ebd6cb"
+    },
+    {
+      "path": "paper/out/hc_taildep_v0_camera_ready/figures/fig_A3_heatmap_exceed99_all_baseline.png",
+      "sha256": "fc153c7b8dbf965238b670a0834d3b4e2ce7869722503655e1df541755b5e4fc"
+    },
+    {
+      "path": "paper/out/hc_taildep_v0_camera_ready/figures/fig_A5_tail_dependence_barplot.png",
+      "sha256": "7c8de57d4a4e7413ce9b37001acc2ba31e007affee8a61711f9568d9cc0b51d0"
+    },
+    {
+      "path": "paper/out/hc_taildep_v0_camera_ready/figures/fig_F1_delta_logscore_cum_ms_t_vs_thr_t.png",
+      "sha256": "a311c7ac15f3e1193c56cf529befe84203fc0dbc0ef4a5d06fa50a870d3236ca"
+    },
+    {
+      "path": "paper/out/hc_taildep_v0_camera_ready/figures/fig_F2_delta_logscore_hist_ms_t_vs_thr_t.png",
+      "sha256": "dc6e95ab54142425c8dda16608ce39c6fb29a4f623c141fced89b4b8280b8c67"
+    },
+    {
+      "path": "paper/out/hc_taildep_v0_camera_ready/figures/fig_F3_es99_timeseries_models.png",
+      "sha256": "e26578dc2c93e07e1c6a5a2ea297023060ec4b0ac76931453929d849c906669b"
+    },
+    {
+      "path": "paper/out/hc_taildep_v0_camera_ready/tables/tab_A1_heatmap_delta_es99_stress.csv",
+      "sha256": "86743696fc3f69e6aba33ae93731c7ec0fc1e2477256c4390ae7ec360be55698"
+    },
+    {
+      "path": "paper/out/hc_taildep_v0_camera_ready/tables/tab_A2_heatmap_ratio_stress_calm_es99.csv",
+      "sha256": "2853629ceb0e52abbd85d24d7da778f575da5fb0d57252cff6e3386d061b1108"
+    },
+    {
+      "path": "paper/out/hc_taildep_v0_camera_ready/tables/tab_A3_heatmap_exceed99_all_baseline.csv",
+      "sha256": "ba9c843582c65049fa53c92d022d39b62a65ff9fb7c331816c5baf1889391ac6"
+    },
+    {
+      "path": "paper/out/hc_taildep_v0_camera_ready/tables/tab_A6_tail_dependence_mc.csv",
+      "sha256": "00631b7b78939ec6da06189475746b654c230191beceedb32a0dddae69a6ae63"
+    },
+    {
+      "path": "paper/out/hc_taildep_v0_camera_ready/tables/tab_T1_logscore_summary.csv",
+      "sha256": "05a6a50914850380f0f3c5e3c6c7de46181ef78b0ca0c0c6fb90a17b0c7fb629"
+    },
+    {
+      "path": "paper/out/hc_taildep_v0_camera_ready/tables/tab_T2_dm_summary.csv",
+      "sha256": "735475a3d382c513596cd52d18e62d56256b36ad7549363018dda814d59c2df4"
+    },
+    {
+      "path": "paper/out/hc_taildep_v0_camera_ready/tables/tab_T3_var_es_summary.csv",
+      "sha256": "052febe0337f1c693b5fd396deb0c6d25596abe063c9adcdfed3f7bceb670976"
+    },
+    {
+      "path": "paper/out/hc_taildep_v0_camera_ready/tables/tab_T4_coverage_tests.csv",
+      "sha256": "e3cb40f10435f0cab09c4a0402fae971872730df74c0a7a004323d97a60b79c8"
+    }
+  ],
+  "paper_id": "hc_taildep_v0_camera_ready",
+  "runs": [
+    {
+      "files": {
+        "config.resolved.yaml": {
+          "exists": true,
+          "sha256": "09a14222bc12b41050713303aee2d37794d5505aafa4a62781a4ce3784260c7e"
+        },
+        "provenance.json": {
+          "exists": true,
+          "sha256": "c58aa87290d944ae62eaab34f5469c65313291d797896143308f7246021123f7"
+        },
+        "report.md": {
+          "exists": true,
+          "sha256": "bad53ee7623003a89e8c72b24465b5559ba3d649be1f901caa8ccab08aa16f02"
+        }
+      },
+      "kind": "j6",
+      "out_dir": "data/processed/ds_v0_btceth_4h_binance_closeutc/copulas/markov/j6_ms2_gold_4h_refit240_mineffT120",
+      "tag": "core_j6"
+    },
+    {
+      "files": {
+        "config.resolved.yaml": {
+          "exists": true,
+          "sha256": "fff743663325f437bd8835d5cdd3cc2e31b11e8d628c29253c5107abe1ab25d5"
+        },
+        "provenance.json": {
+          "exists": true,
+          "sha256": "395deb35f055d9f8531cbde6cf89f98587d16a7bb92b3a3ecb8d39c0a2f6f2fa"
+        },
+        "report.md": {
+          "exists": true,
+          "sha256": "e359609ba7b5e158276ed04dc7d25ffb070f9fc52490ae40d35f3d80dfdf7474"
+        }
+      },
+      "kind": "j7",
+      "out_dir": "data/processed/ds_v0_btceth_4h_binance_closeutc/impact/j7_var_es/j7_var_es_4h_sensitivity_N20000",
+      "tag": "core_j7"
+    },
+    {
+      "files": {
+        "config.resolved.yaml": {
+          "exists": true,
+          "sha256": "8ea5a8c54e5cb142a3a524aa2b07320f1e00cba83dc4f47cef47cc14d0638029"
+        },
+        "provenance.json": {
+          "exists": true,
+          "sha256": "96aa457d2c655ae79e194094ef7588c2acb2f93d5bd83c22d289ae56c7a5a22b"
+        },
+        "report.md": {
+          "exists": true,
+          "sha256": "752edba2cecd728a75ab7c5ba54a52697d30bdbc0dd8c91af3cdb68c1147679b"
+        }
+      },
+      "kind": "j8_top8",
+      "out_dir": "data/processed/ds_v0_top8_daily_binance_closeutc/impact/j8_top8_pairwise/j8_top8_pairwise_daily_refit40_N10000_ms_spot6",
+      "tag": "annex_j8_top8"
+    },
+    {
+      "files": {
+        "config.resolved.yaml": {
+          "exists": true,
+          "sha256": "f58d64524ae0d915821dd46560812a0797b4bdef3aeb2acfd241b89c63dcda1a"
+        },
+        "provenance.json": {
+          "exists": true,
+          "sha256": "584328175d505d9fc960903ed18388d6a76c6bc063e6b93469426bd8b84769f9"
+        },
+        "report.md": {
+          "exists": true,
+          "sha256": "34a06b29118ec3c3992d8cffa648ed36aed4752ec5aaec9b9f8d88f2453ad747"
+        }
+      },
+      "kind": "j8_asym",
+      "out_dir": "data/processed/ds_v0_btceth_daily_binance_closeutc/impact/j8_asym_copulas/j8_asym_btceth_daily_refit40_N20000",
+      "tag": "annex_j8_asym"
+    }
+  ],
+  "spec_path": "paper/paper_spec.yaml",
+  "spec_sha256": "7f43dcb37469f12aa9d520076f27c61bd05f3bea1ec65f7e9e2428cbd4f4dd08"
+}

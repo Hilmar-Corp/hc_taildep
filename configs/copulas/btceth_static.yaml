@@ -1,0 +1,20 @@
+copula_static:
+  dataset_version: ds_v0_btceth_daily_binance_closeutc
+
+  inputs:
+    pits_subdir: pits
+    u_file: u_series.csv
+    splits_file: splits.json
+
+  oos:
+    # window auto via splits.json: [first_oos, last_oos]
+    refit_every: 20          # points OOS entre refits (pas "jours calendaires")
+    rho_clamp: 1.0e-6
+
+  student_t:
+    nu_grid: [3, 4, 5, 7, 10, 15, 20, 30, 50]
+    nu_bounds: [2.1, 60.0]
+
+  reporting:
+    rolling_window: 63
+    csv_float_format: "%.10g"

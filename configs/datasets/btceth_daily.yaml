@@ -1,0 +1,33 @@
+dataset:
+  dataset_version: ds_v0_btceth_daily_binance_closeutc
+  source:
+    name: binance_spot
+    base_url: https://api.binance.com
+    endpoint: /api/v3/klines
+    interval: 1d
+    symbols:
+      BTC: BTCUSDT
+      ETH: ETHUSDT
+  timezone: UTC
+  price_field: close
+
+  # période (on peut laisser null pour "max", mais on verrouille une règle)
+  start_date: "2017-08-17"   # 1er jour utile Binance BTCUSDT
+  end_date: null            # null = jusqu'au dernier jour dispo
+
+  # politique calendrier
+  alignment:
+    method: intersection_strict    # garder uniquement les dates communes BTC & ETH
+    allow_missing: false
+    drop_first_return: true        # première ligne NaN après diff
+
+splits:
+  # règle: expanding; fit <= t-1, score at t
+  oos_convention: fit_to_t_minus_1_score_at_t
+  min_train_days: 730              # 2 ans de warmup avant OOS (verrouillé)
+  first_oos_date: null             # si null, calculé via min_train_days
+  last_oos_date: null              # si null, = dernière date dispo
+
+paths:
+  raw_dir: data/raw/binance_klines
+  processed_root: data/processed
