@@ -1,4 +1,4 @@
-# hc_taildep — Tail Dependence & Regime-Aware Copula Evaluation (BTC/ETH)
+# hc_taildep : Tail Dependence & Regime-Aware Copula Evaluation (BTC/ETH)
 
 ## Objet
 
