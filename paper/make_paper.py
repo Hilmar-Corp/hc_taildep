@@ -573,11 +573,175 @@ def fig_rv_stress_timeline(
 
     ax.grid(axis="y", linestyle=":", linewidth=1.0)
     ax.legend(loc="best", fontsize=9, frameon=True)
+    ax.legend(loc="best", fontsize=9, frameon=True)
 
     fig.tight_layout()
     _ensure_dir(out_path.parent)
     fig.savefig(out_path, dpi=int(dpi))
     plt.close(fig)
+
+
+
+# ----------------------------
+# Chapter 5 (core): stress observable S_t and continuous z_t
+# ----------------------------
+
+def table_stress_mask_and_z(
+    returns_csv: Path,
+    splits: dict[str, Any],
+    *,
+    asset: str = "BTC",
+    rv_window: int = 30,
+    calm_q: float = 0.50,
+    stress_q: float = 0.90,
+) -> tuple[pd.DataFrame, float, float, float, float]:
+    """
+    Build a single, reproducible stress source from returns:
+      RV_t = sqrt(sum_{i=t-w+1..t} r_i^2)
+      tau_calm   = quantile(RV_train, calm_q)
+      tau_stress = quantile(RV_train, stress_q)
+      S_t = 1{RV_t >= tau_stress}
+      z_t = (RV_t - median(RV_train)) / MAD(RV_train)   (robust, train-only)
+
+    Returns:
+      (df, tau_calm, tau_stress, med_train, mad_train)
+
+    df columns: date, RV_t, tau_calm, tau_stress, S_t, z_t
+    """
+    df = _load_csv(returns_csv)
+
+    time_col, asset_cols = _infer_returns_time_and_asset_cols(df)
+    if not asset_cols:
+        raise MissingArtifactError(f"No numeric asset columns found in returns.csv: {returns_csv}")
+
+    btc_col, eth_col = _pick_btc_eth_cols(asset_cols)
+    chosen = None
+    if asset.upper() == "BTC":
+        chosen = btc_col or (asset_cols[0] if asset_cols else None)
+    elif asset.upper() == "ETH":
+        chosen = eth_col or (asset_cols[0] if asset_cols else None)
+    else:
+        for c in asset_cols:
+            if c.lower() == asset.lower():
+                chosen = c
+                break
+        if chosen is None:
+            chosen = asset_cols[0]
+
+    if chosen is None or chosen not in df.columns:
+        raise MissingArtifactError(f"Cannot select asset column for stress driver. asset={asset} cols={asset_cols[:20]}")
+
+    # Force UTC-aware timestamps (prevents naive vs aware comparisons)
+    t = pd.to_datetime(df[time_col], utc=True, errors="coerce")
+    r = pd.to_numeric(df[chosen], errors="coerce").to_numpy(dtype=float)
+    m = (t.notna().to_numpy()) & (r == r) & (r != float("inf")) & (r != -float("inf"))
+    t = t[m].reset_index(drop=True)
+    r = r[m]
+
+    rv = _rolling_rv_from_returns(r, window=int(rv_window))
+
+    train_start = pd.to_datetime(str(splits["train_start"]), utc=True, errors="raise")
+    first_oos = pd.to_datetime(str(splits["first_oos"]), utc=True, errors="raise")
+    last_oos = pd.to_datetime(str(splits["last_oos"]), utc=True, errors="raise")
+
+    m_train = (t >= train_start) & (t < first_oos) & np.isfinite(rv)
+    rv_train = rv[m_train.to_numpy()]
+    if rv_train.size < 50:
+        raise MissingArtifactError(f"Not enough TRAIN RV points for stress driver. Got {rv_train.size}.")
+
+    tau_calm = float(np.quantile(rv_train, float(calm_q)))
+    tau_stress = float(np.quantile(rv_train, float(stress_q)))
+
+    # binary stress
+    S_t = (rv >= tau_stress).astype(int)
+
+    # robust z_t (train-only median/MAD)
+    med = float(np.median(rv_train))
+    mad = float(np.median(np.abs(rv_train - med)))
+    if (not np.isfinite(mad)) or mad <= 0:
+        # deterministic fallback (avoid div-by-0); still train-only
+        sd = float(np.std(rv_train))
+        mad = sd if (np.isfinite(sd) and sd > 0) else 1.0
+    z_t = (rv - med) / mad
+
+    out = pd.DataFrame(
+        {
+            "date": pd.to_datetime(t, utc=True),
+            "RV_t": rv,
+            "tau_calm": tau_calm,
+            "tau_stress": tau_stress,
+            "S_t": S_t,
+            "z_t": z_t,
+        }
+    )
+
+    # reviewer-facing window only
+    out = out[(out["date"] >= train_start) & (out["date"] <= last_oos)].reset_index(drop=True)
+
+    return out, tau_calm, tau_stress, med, mad
+
+
+def fig_stress_driver_rv_tau_S_z(
+    stress_df: pd.DataFrame,
+    out_path: Path,
+    *,
+    fig_w: float,
+    fig_h: float,
+    dpi: int,
+) -> None:
+    """Chapter 5 figure: RV_t + thresholds + stress shading + z_t panel."""
+    if stress_df.empty:
+        raise MissingArtifactError("stress_df is empty")
+    for c in ["date", "RV_t", "tau_calm", "tau_stress", "S_t", "z_t"]:
+        if c not in stress_df.columns:
+            raise MissingArtifactError(f"stress_df missing column '{c}'")
+
+    t = pd.to_datetime(stress_df["date"], utc=True, errors="coerce")
+    rv = pd.to_numeric(stress_df["RV_t"], errors="coerce").to_numpy(dtype=float)
+    z = pd.to_numeric(stress_df["z_t"], errors="coerce").to_numpy(dtype=float)
+    S = pd.to_numeric(stress_df["S_t"], errors="coerce").fillna(0).to_numpy(dtype=int)
+
+    tau_calm = float(pd.to_numeric(stress_df["tau_calm"], errors="coerce").dropna().iloc[0])
+    tau_stress = float(pd.to_numeric(stress_df["tau_stress"], errors="coerce").dropna().iloc[0])
+
+    _set_matplotlib_style(fig_w, fig_h)
+    w = max(10.0, float(fig_w))
+    h = max(6.0, float(fig_h) * 1.35)
+    fig, ax = plt.subplots(2, 1, figsize=(w, h), sharex=True)
+
+    ax[0].plot(t, rv, linewidth=1.1)
+    ax[0].axhline(tau_calm, linestyle="--", linewidth=1.2)
+    ax[0].axhline(tau_stress, linestyle="--", linewidth=1.4)
+
+    mS = (S == 1) & np.isfinite(rv)
+    idx = np.where(mS)[0]
+    if idx.size:
+        s0 = idx[0]
+        p0 = idx[0]
+        for k in idx[1:]:
+            if k == p0 + 1:
+                p0 = k
+                continue
+            ax[0].axvspan(t.iloc[s0], t.iloc[p0], alpha=0.18)
+            s0 = k
+            p0 = k
+        ax[0].axvspan(t.iloc[s0], t.iloc[p0], alpha=0.18)
+
+    ax[0].set_title("Stress driver (core): RV_t (train-only thresholds) + S_t")
+    ax[0].set_ylabel("RV_t")
+    ax[0].grid(axis="y", linestyle=":", linewidth=1.0)
+
+    ax[1].plot(t, z, linewidth=1.1)
+    ax[1].axhline(0.0, linestyle=":", linewidth=1.0)
+    ax[1].set_ylabel("z_t (robust)")
+    ax[1].set_xlabel("time (UTC)")
+    ax[1].grid(axis="y", linestyle=":", linewidth=1.0)
+
+    fig.tight_layout()
+    _ensure_dir(out_path.parent)
+    fig.savefig(out_path, dpi=int(dpi))
+    plt.close(fig)
+
 
 
 # ----------------------------
@@ -1884,15 +2048,37 @@ def _find_j4_taildep_dir(repo_root: Path, ds_root_paper: Path) -> Optional[Path]
     return None
 
 
-def _extract_j4_bootstrap_payload(j: dict[str, Any]) -> tuple[str, list[float], float | None, float | None, float | None, float | None]:
+def _extract_j4_bootstrap_payload(
+    j: dict[str, Any]
+) -> tuple[str, list[float] | None, float | None, float | None, float | None, float | None]:
     """Extract a bootstrap payload from taildep_bootstrap.json.
 
     Returns:
-      (label_key, samples_list, delta_obs, ci_low, ci_high, pvalue)
+      (label_key, samples_list_or_None, delta_obs, ci_low, ci_high, pvalue)
 
-    Supports flexible schemas under j["results"].
+    Supports schemas:
+      A) dict:
+         {"results": {"RV": {...}, "JDown": {...}}}
+      B) list (your current J4 runner):
+         {"results": [ {"definition":"RV", ...}, {"definition":"JDown", ...} ]}
+
+    Samples are OPTIONAL: some runners store only a sha256 hash of samples.
     """
     results = j.get("results", None)
+    if results is None:
+        raise MissingArtifactError("taildep_bootstrap.json: missing 'results' field")
+
+    # normalize list -> dict keyed by 'definition'
+    if isinstance(results, list):
+        d: dict[str, Any] = {}
+        for item in results:
+            if isinstance(item, Mapping):
+                key = str(item.get("definition", "")).strip()
+                if not key:
+                    key = f"def_{len(d)}"
+                d[key] = item
+        results = d
+
     if not isinstance(results, Mapping) or not results:
         raise MissingArtifactError("taildep_bootstrap.json: missing/invalid 'results' field")
 
@@ -1903,14 +2089,13 @@ def _extract_j4_bootstrap_payload(j: dict[str, Any]) -> tuple[str, list[float], 
     if not isinstance(obj, Mapping):
         raise MissingArtifactError(f"taildep_bootstrap.json: results['{k0}'] is not a dict")
 
-    # find samples array
+    # ---- optional samples extraction ----
     samples = None
     for kk in ["delta_lambda_samples", "delta_lambda_boot", "samples", "boot", "delta_lambda_draws"]:
         if kk in obj and isinstance(obj[kk], list):
             samples = obj[kk]
             break
-
-    # some runners store under nested key
+    # nested schema
     if samples is None:
         for kk in obj.keys():
             if isinstance(obj[kk], Mapping):
@@ -1922,14 +2107,12 @@ def _extract_j4_bootstrap_payload(j: dict[str, Any]) -> tuple[str, list[float], 
             if samples is not None:
                 break
 
-    if samples is None:
-        raise MissingArtifactError(f"taildep_bootstrap.json: cannot find bootstrap samples list in results['{k0}']")
-
-    # numeric cast + finite filter
-    s = np.asarray(pd.to_numeric(pd.Series(samples), errors="coerce"), dtype=float)
-    s = s[np.isfinite(s)]
-    if s.size < 20:
-        raise MissingArtifactError(f"taildep_bootstrap.json: too few finite samples ({s.size})")
+    samples_list: list[float] | None = None
+    if samples is not None:
+        ss = np.asarray(pd.to_numeric(pd.Series(samples), errors="coerce"), dtype=float)
+        ss = ss[np.isfinite(ss)]
+        if ss.size >= 1:
+            samples_list = ss.tolist()
 
     def _get_float(*names: str) -> float | None:
         for nm in names:
@@ -1942,12 +2125,21 @@ def _extract_j4_bootstrap_payload(j: dict[str, Any]) -> tuple[str, list[float], 
                     pass
         return None
 
-    delta_obs = _get_float("delta_lambda_obs", "delta_lambda", "delta_obs")
+    # support both naming conventions
+    delta_obs = _get_float("delta_lambda_obs", "delta_lambda", "delta_obs", "delta_lambda_hat")
+
     ci_low = _get_float("ci_low", "ci_lower", "ci_l", "ci025")
     ci_high = _get_float("ci_high", "ci_upper", "ci_h", "ci975")
-    pvalue = _get_float("pvalue", "p_value", "p")
+    if (ci_low is None or ci_high is None) and ("delta_lambda_ci95" in obj) and isinstance(obj["delta_lambda_ci95"], list) and len(obj["delta_lambda_ci95"]) == 2:
+        try:
+            ci_low = float(obj["delta_lambda_ci95"][0])
+            ci_high = float(obj["delta_lambda_ci95"][1])
+        except Exception:
+            pass
 
-    return (k0, s.tolist(), delta_obs, ci_low, ci_high, pvalue)
+    pvalue = _get_float("pvalue", "p_value", "p", "pvalue_two_sided")
+
+    return (k0, samples_list, delta_obs, ci_low, ci_high, pvalue)
 
 
 def fig_j4_delta_lambda_bootstrap_hist(
@@ -1958,33 +2150,84 @@ def fig_j4_delta_lambda_bootstrap_hist(
     fig_h: float,
     dpi: int,
 ) -> None:
-    """Figure F9: histogram of Δλ^{(b)} with marker at 0 and observed Δλ."""
+    """Figure F9: histogram of Δλ^{(b)} with marker at 0 and observed Δλ.
+
+    If samples are not stored in taildep_bootstrap.json, we generate a placeholder figure (no crash).
+    """
     j = json.loads(_read_text(bootstrap_json))
     label, samples, delta_obs, ci_low, ci_high, pvalue = _extract_j4_bootstrap_payload(j)
+
+    # Placeholder if samples are missing (your current J4 stores only a hash)
+    if samples is None or len(samples) == 0:
+        _set_matplotlib_style(fig_w, fig_h)
+        fig, ax = plt.subplots(figsize=(max(7.8, fig_w), max(4.2, fig_h)))
+        ax.axis("off")
+        lines = [
+            "Δλ bootstrap histogram (J4)",
+            f"definition: {label}",
+            "",
+            "Bootstrap samples were not stored in taildep_bootstrap.json.",
+            "Only a sha256 hash of the samples is available.",
+            "",
+            f"Δλ_hat: {delta_obs if delta_obs is not None else 'NA'}",
+            f"CI95: [{ci_low}, {ci_high}]" if (ci_low is not None and ci_high is not None) else "CI95: NA",
+            f"p(two-sided): {pvalue if pvalue is not None else 'NA'}",
+            "",
+            "To get the real histogram: rerun J4 with sample storage enabled.",
+        ]
+        ax.text(0.02, 0.98, "\n".join(lines), ha="left", va="top", fontsize=11)
+        fig.tight_layout()
+        _ensure_dir(out_path.parent)
+        fig.savefig(out_path, dpi=int(dpi))
+        plt.close(fig)
+        return
 
     x = np.asarray(samples, dtype=float)
     _set_matplotlib_style(fig_w, fig_h)
     fig, ax = plt.subplots(figsize=(max(7.8, fig_w), max(4.2, fig_h)))
 
     ax.hist(x, bins=60)
-    ax.axvline(0.0, linewidth=2.0)
-    if delta_obs is not None and np.isfinite(delta_obs):
-        ax.axvline(float(delta_obs), linewidth=2.5)
 
-    ax.set_title(f"Δλ bootstrap (J4) — {label}")
+    # CI shading if available
+    if ci_low is not None and ci_high is not None and np.isfinite(ci_low) and np.isfinite(ci_high):
+        lo = float(min(ci_low, ci_high))
+        hi = float(max(ci_low, ci_high))
+        ax.axvspan(lo, hi, alpha=0.12, label="CI95")
+
+    # Markers
+    ax.axvline(0.0, linewidth=2.0, label="0")
+    if delta_obs is not None and np.isfinite(delta_obs):
+        ax.axvline(float(delta_obs), linewidth=2.5, label="Δλ_obs")
+
+    # Pad x-limits so 0 isn't glued to the border
+    xmin = float(min(np.min(x), 0.0))
+    xmax = float(np.max(x))
+    span = max(1e-12, xmax - xmin)
+    pad = 0.02 * span
+    ax.set_xlim(xmin - pad, xmax + pad)
+
+    ax.set_title(f"Δλ bootstrap — {label}")
     ax.set_xlabel("Δλ^{(b)}")
     ax.set_ylabel("count")
     ax.grid(axis="y", linestyle=":", linewidth=1.0)
 
+    # Annotation block (avoid printing p=0; use p < 1/B)
+    B = int(np.isfinite(x).sum())
     lines = []
-    if delta_obs is not None:
-        lines.append(f"Δλ_obs = {delta_obs:.4g}")
-    if ci_low is not None and ci_high is not None:
-        lines.append(f"CI = [{ci_low:.4g}, {ci_high:.4g}]")
-    if pvalue is not None:
-        lines.append(f"p = {pvalue:.4g}")
+    if delta_obs is not None and np.isfinite(delta_obs):
+        lines.append(f"Δλ_obs = {float(delta_obs):.4g}")
+    if ci_low is not None and ci_high is not None and np.isfinite(ci_low) and np.isfinite(ci_high):
+        lines.append(f"CI95 = [{float(ci_low):.4g}; {float(ci_high):.4g}]")
+    if pvalue is not None and np.isfinite(pvalue) and B > 0:
+        pv = float(pvalue)
+        if pv <= 0.0:
+            lines.append(f"p < {1.0/float(B):.4g}")
+        else:
+            lines.append(f"p = {pv:.4g}")
     if lines:
         ax.text(0.02, 0.98, "\n".join(lines), transform=ax.transAxes, ha="left", va="top", fontsize=9)
+
+    ax.legend(loc="best", fontsize=9, frameon=True)
 
     fig.tight_layout()
     _ensure_dir(out_path.parent)
@@ -2011,14 +2254,29 @@ def table_j4_taildep_params_lambda(j4_dir: Path) -> pd.DataFrame:
 
     j = json.loads(_read_text(boot))
     label, samples, delta_obs, ci_low, ci_high, pvalue = _extract_j4_bootstrap_payload(j)
+
+    # If samples are not stored, return a minimal, reviewer-facing summary row
+    if samples is None or len(samples) == 0:
+        rows = [{
+            "definition": label,
+            "delta_lambda_obs": delta_obs,
+            "ci_low": ci_low,
+            "ci_high": ci_high,
+            "pvalue": pvalue,
+            "B": None,
+            "note": "bootstrap samples not stored; only (Δλ_hat, CI95, p) available",
+        }]
+        return pd.DataFrame(rows)
+
     x = np.asarray(samples, dtype=float)
+    x = x[np.isfinite(x)]
 
     rows = [
         {
             "definition": label,
             "delta_lambda_obs": delta_obs,
-            "boot_mean": float(np.mean(x)),
-            "boot_std": float(np.std(x, ddof=1)) if x.size > 1 else 0.0,
+            "boot_mean": float(np.mean(x)) if x.size else None,
+            "boot_std": float(np.std(x, ddof=1)) if x.size > 1 else (0.0 if x.size == 1 else None),
             "ci_low": ci_low,
             "ci_high": ci_high,
             "pvalue": pvalue,
@@ -2311,6 +2569,26 @@ def main() -> int:
         fig_h=fig_h,
         dpi=dpi,
     )
+
+    # Chapter 5 core stress source (S_t, z_t) + dedicated figure
+    stress_df, tau_calm, tau_stress, med, mad = table_stress_mask_and_z(
+        returns_csv,
+        splits_obj,
+        asset=str(out_cfg.get("rv_asset", "BTC")),
+        rv_window=int(out_cfg.get("rv_window", 30)),
+        calm_q=float(out_cfg.get("rv_calm_q", 0.50)),
+        stress_q=float(out_cfg.get("rv_stress_q", 0.90)),
+    )
+    _save_csv_stable(stress_df, tab_out / "tab_FX_stress_mask.csv", float_fmt=float_fmt, table_round=table_round)
+    fig_stress_driver_rv_tau_S_z(
+        stress_df,
+        fig_out / "fig_FX_stress_driver_rv_tau_S_z.png",
+        fig_w=fig_w,
+        fig_h=fig_h,
+        dpi=dpi,
+    )
+
+
 
     # CORE figs
     fig_delta_logscore_cum(j6, fig_out / "fig_F1_delta_logscore_cum_ms_t_vs_thr_t.png", fig_w=fig_w, fig_h=fig_h, dpi=dpi)

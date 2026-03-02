@@ -30,6 +30,6 @@ python -m paper.make_paper --spec paper/paper_spec.yaml
 
 ## Manifest (summary)
 
-- manifest_sha256: `9be6a83c734b879ab1ef2b6cd60f794c48b013077f2811db630158f5897fc66e`
-- created_utc: `2026-02-21T17:22:20+00:00`
-- git: {"branch": null, "commit": null, "dirty": null}
+- manifest_sha256: `7c88030f4dadc0145d7ec43928e3f6d6beb19282e07ad03beb82cd938116cbae`
+- created_utc: `2026-02-23T20:19:00+00:00`
+- git: {"branch": "main", "commit": "d50a1929c614711308e0b42eab8bb02ba20a2fba", "dirty": true}

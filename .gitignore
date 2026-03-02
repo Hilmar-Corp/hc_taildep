@@ -31,3 +31,8 @@ paper/out/**/tables/
 
 # logs
 *.log
+
+# --- auto (safety) ---
+**/__pycache__/
+**/*.pyc
+paper/out/
