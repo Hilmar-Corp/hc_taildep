@@ -36,3 +36,4 @@ paper/out/**/tables/
 **/__pycache__/
 **/*.pyc
 paper/out/
+*.bak
