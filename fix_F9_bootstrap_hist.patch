@@ -1,0 +1,74 @@
+diff --git a/paper/make_paper.py b/paper/make_paper.py
+index 1111111..2222222 100644
+--- a/paper/make_paper.py
++++ b/paper/make_paper.py
+@@ -1953,45 +1953,74 @@ def fig_j4_delta_lambda_bootstrap_hist(
+ ) -> None:
+     """Figure F9: histogram of Δλ^{(b)} with marker at 0 and observed Δλ."""
+     j = json.loads(_read_text(bootstrap_json))
+     label, samples, delta_obs, ci_low, ci_high, pvalue = _extract_j4_bootstrap_payload(j)
+
+     x = np.asarray(samples, dtype=float)
+     _set_matplotlib_style(fig_w, fig_h)
+     fig, ax = plt.subplots(figsize=(max(7.8, fig_w), max(4.2, fig_h)))
+
+-    ax.hist(x, bins=60)
+-    ax.axvline(0.0, linewidth=2.0)
+-    if delta_obs is not None and np.isfinite(delta_obs):
+-        ax.axvline(float(delta_obs), linewidth=2.5)
++    ax.hist(x, bins=60)
++
++    # CI shading (if available)
++    if ci_low is not None and ci_high is not None and np.isfinite(ci_low) and np.isfinite(ci_high):
++        lo = float(min(ci_low, ci_high))
++        hi = float(max(ci_low, ci_high))
++        ax.axvspan(lo, hi, alpha=0.12, label="CI95")
++
++    # Markers
++    ax.axvline(0.0, linewidth=2.0, label="0")
++    if delta_obs is not None and np.isfinite(delta_obs):
++        ax.axvline(float(delta_obs), linewidth=2.5, label="Δλ_obs")
++
++    # xlim padding so 0-line is not stuck on the border
++    xmin = float(min(np.min(x), 0.0))
++    xmax = float(np.max(x))
++    span = max(1e-12, xmax - xmin)
++    pad = 0.02 * span
++    ax.set_xlim(xmin - pad, xmax + pad)
+
+     ax.set_title(f"Δλ bootstrap (J4) — {label}")
+     ax.set_xlabel("Δλ^{(b)}")
+     ax.set_ylabel("count")
+     ax.grid(axis="y", linestyle=":", linewidth=1.0)
+
+-    lines = []
+-    if delta_obs is not None:
+-        lines.append(f"Δλ_obs = {delta_obs:.4g}")
+-    if ci_low is not None and ci_high is not None:
+-        lines.append(f"CI = [{ci_low:.4g}, {ci_high:.4g}]")
+-    if pvalue is not None:
+-        lines.append(f"p = {pvalue:.4g}")
+-    if lines:
+-        ax.text(0.02, 0.98, "\n".join(lines), transform=ax.transAxes, ha="left", va="top", fontsize=9)
++    # Annotation block (never print p=0)
++    B = int(np.isfinite(x).sum())
++    lines = []
++    if delta_obs is not None and np.isfinite(delta_obs):
++        lines.append(f"Δλ_obs = {float(delta_obs):.4g}")
++    if ci_low is not None and ci_high is not None and np.isfinite(ci_low) and np.isfinite(ci_high):
++        lines.append(f"CI95 = [{float(ci_low):.4g}; {float(ci_high):.4g}]")
++    if pvalue is not None and np.isfinite(pvalue) and B > 0:
++        pv = float(pvalue)
++        if pv <= 0.0:
++            lines.append(f"p < {1.0/float(B):.4g}")
++        else:
++            lines.append(f"p = {pv:.4g}")
++    if lines:
++        ax.text(0.02, 0.98, "\n".join(lines), transform=ax.transAxes, ha="left", va="top", fontsize=9)
++
++    ax.legend(loc="best", fontsize=9, frameon=True)
+
+     fig.tight_layout()
+     _ensure_dir(out_path.parent)
+     fig.savefig(out_path, dpi=int(dpi))
+     plt.close(fig)

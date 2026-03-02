@@ -1,0 +1,172 @@
+diff --git a/paper/make_paper.py b/paper/make_paper.py
+--- a/paper/make_paper.py
++++ b/paper/make_paper.py
+@@ -1888,38 +1888,126 @@ def _extract_j4_bootstrap_payload(j: dict[str, Any]) -> tuple[str, list[float],
+-    results = j.get("results", None)
+-    if not isinstance(results, Mapping) or not results:
+-        raise MissingArtifactError("taildep_bootstrap.json: missing/invalid 'results' field")
+-
+-    # pick first definition deterministically
+-    keys = sorted([str(k) for k in results.keys()])
+-    k0 = keys[0]
+-    obj = results.get(k0, None)
+-    if not isinstance(obj, Mapping):
+-        raise MissingArtifactError(f"taildep_bootstrap.json: results['{k0}'] is not a dict")
++    results = j.get("results", None)
++    if results is None:
++        raise MissingArtifactError("taildep_bootstrap.json: missing 'results' field")
++
++    # Support multiple schemas:
++    # (A) results: {definition_key: {...}}  (Mapping)
++    # (B) results: [{definition:..., ...}, ...] (List)
++    if isinstance(results, Mapping) and results:
++        keys = sorted([str(k) for k in results.keys()])
++        label = keys[0]
++        obj = results.get(label, None)
++        if not isinstance(obj, Mapping):
++            raise MissingArtifactError(f"taildep_bootstrap.json: results['{label}'] is not a dict")
++    elif isinstance(results, list) and len(results) > 0:
++        items = [o for o in results if isinstance(o, Mapping)]
++        if not items:
++            raise MissingArtifactError("taildep_bootstrap.json: results list has no dict items")
++        # deterministic pick: sort by definition if present
++        def _key(o):
++            return str(o.get("definition", ""))
++        items = sorted(items, key=_key)
++        obj = items[0]
++        label = str(obj.get("definition", "j4"))
++    else:
++        raise MissingArtifactError("taildep_bootstrap.json: invalid 'results' type (expected dict or list)")
+ 
+-    # find samples array
+-    samples = None
+-    for kk in ["delta_lambda_samples", "delta_lambda_boot", "samples", "boot", "delta_lambda_draws"]:
+-        if kk in obj and isinstance(obj[kk], list):
+-            samples = obj[kk]
+-            break
+-
+-    # some runners store under nested key
+-    if samples is None:
+-        for kk in obj.keys():
+-            if isinstance(obj[kk], Mapping):
+-                sub = obj[kk]
+-                for sk in ["delta_lambda_samples", "delta_lambda_boot", "samples"]:
+-                    if sk in sub and isinstance(sub[sk], list):
+-                        samples = sub[sk]
+-                        break
+-            if samples is not None:
+-                break
+-
+-    if samples is None:
+-        raise MissingArtifactError(f"taildep_bootstrap.json: cannot find bootstrap samples list in results['{k0}']")
++    # helper: try pull scalar float from multiple keys
++    def _get_float_from(o: Mapping, *names: str) -> float | None:
++        for nm in names:
++            if nm in o:
++                try:
++                    v = float(o[nm])
++                    if np.isfinite(v):
++                        return v
++                except Exception:
++                    pass
++        return None
++
++    # helper: parse CI list/tuple
++    def _get_ci_from(o: Mapping, *names: str) -> tuple[float | None, float | None]:
++        for nm in names:
++            if nm in o:
++                try:
++                    v = o[nm]
++                    if isinstance(v, (list, tuple)) and len(v) >= 2:
++                        lo = float(v[0]); hi = float(v[1])
++                        lo = lo if np.isfinite(lo) else None
++                        hi = hi if np.isfinite(hi) else None
++                        return (lo, hi)
++                except Exception:
++                    pass
++        return (None, None)
++
++    # 1) Try to find stored samples (often not stored; only hash is stored)
++    samples = None
++    for kk in ["delta_lambda_samples", "delta_lambda_boot", "samples", "boot", "delta_lambda_draws"]:
++        if kk in obj and isinstance(obj[kk], list):
++            samples = obj[kk]
++            break
++    if samples is None:
++        # nested "bootstrap" dict may exist
++        boot = obj.get("bootstrap", None)
++        if isinstance(boot, Mapping):
++            for sk in ["delta_lambda_samples", "samples", "draws"]:
++                if sk in boot and isinstance(boot[sk], list):
++                    samples = boot[sk]
++                    break
++
++    # 2) Pull observed delta / CI / pvalue from multiple key conventions
++    delta_obs = _get_float_from(obj, "delta_lambda_obs", "delta_lambda", "delta_obs", "delta_lambda_hat")
++    ci_low, ci_high = _get_ci_from(obj, "ci95", "ci_95", "delta_lambda_ci95", "delta_lambda_ci")
++    pvalue = _get_float_from(obj, "pvalue", "p_value", "p", "pvalue_two_sided")
++
++    # If samples not stored (common), return empty list and let caller create a placeholder figure
++    if samples is None:
++        return (label, [], delta_obs, ci_low, ci_high, pvalue)
+ 
+     # numeric cast + finite filter
+     s = np.asarray(pd.to_numeric(pd.Series(samples), errors="coerce"), dtype=float)
+     s = s[np.isfinite(s)]
+-    if s.size < 20:
+-        raise MissingArtifactError(f"taildep_bootstrap.json: too few finite samples ({s.size})")
+-
+-    def _get_float(*names: str) -> float | None:
+-        for nm in names:
+-            if nm in obj:
+-                try:
+-                    v = float(obj[nm])
+-                    if np.isfinite(v):
+-                        return v
+-                except Exception:
+-                    pass
+-        return None
+-
+-    delta_obs = _get_float("delta_lambda_obs", "delta_lambda", "delta_obs")
+-    ci_low = _get_float("ci_low", "ci_lower", "ci_l", "ci025")
+-    ci_high = _get_float("ci_high", "ci_upper", "ci_h", "ci975")
+-    pvalue = _get_float("pvalue", "p_value", "p")
+-
+-    return (k0, s.tolist(), delta_obs, ci_low, ci_high, pvalue)
++    if s.size < 20:
++        return (label, [], delta_obs, ci_low, ci_high, pvalue)
++
++    return (label, s.tolist(), delta_obs, ci_low, ci_high, pvalue)
+@@ -1958,6 +2046,33 @@ def fig_j4_delta_lambda_bootstrap_hist(
+     """Figure F9: histogram of Δλ^{(b)} with marker at 0 and observed Δλ."""
+     j = json.loads(_read_text(bootstrap_json))
+     label, samples, delta_obs, ci_low, ci_high, pvalue = _extract_j4_bootstrap_payload(j)
++
++    # If samples are not stored, output a placeholder figure (do not fail whole build)
++    if samples is None or len(samples) == 0:
++        _set_matplotlib_style(fig_w, fig_h)
++        fig, ax = plt.subplots(figsize=(max(7.8, fig_w), max(4.2, fig_h)))
++        ax.axis("off")
++        lines = [
++            "Δλ bootstrap histogram (J4)",
++            f"definition: {label}",
++            "",
++            "Bootstrap samples were not stored in taildep_bootstrap.json",
++            "(only a hash of samples exists).",
++            "",
++            f"Δλ_hat: {delta_obs if delta_obs is not None else 'NA'}",
++            f"CI95: [{ci_low if ci_low is not None else 'NA'}, {ci_high if ci_high is not None else 'NA'}]",
++            f"p(two-sided): {pvalue if pvalue is not None else 'NA'}",
++            "",
++            "To get the real histogram: rerun J4 with samples saved (delta_lambda_samples).",
++        ]
++        ax.text(0.02, 0.98, "\n".join(lines), ha="left", va="top", fontsize=10)
++        fig.tight_layout()
++        _ensure_dir(out_path.parent)
++        fig.savefig(out_path, dpi=int(dpi))
++        plt.close(fig)
++        return
+ 
+     x = np.asarray(samples, dtype=float)
+     _set_matplotlib_style(fig_w, fig_h)
+     fig, ax = plt.subplots(figsize=(max(7.8, fig_w), max(4.2, fig_h)))

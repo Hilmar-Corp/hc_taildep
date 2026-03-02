@@ -4,6 +4,8 @@
 
 paper_id: hc_taildep_v0_camera_ready
 
+
+
 outputs:
   out_dir: paper/out/${paper_id}
   formats: ["png"]          # ["png","pdf"] if you want both
@@ -26,7 +28,8 @@ core:
   # J7 impact VaR/ES run (must contain: var_es_predictions.csv, tables/var_es_summary.csv, tables/coverage_tests.csv)
   j7:
     out_dir: data/processed/ds_v0_btceth_4h_binance_closeutc/impact/j7_var_es/j7_var_es_4h_sensitivity_N20000
-
+  j3:
+    out_dir: data/processed/ds_v0_btceth_daily_binance_closeutc/copulas/static
 annex:
   # J8 top-8 heatmaps (must contain: tables/heatmap_*.csv)
   j8_top8:

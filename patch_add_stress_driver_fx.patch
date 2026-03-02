@@ -1,0 +1,210 @@
+diff --git a/paper/make_paper.py b/paper/make_paper.py
+index 1111111..2222222 100644
+--- a/paper/make_paper.py
++++ b/paper/make_paper.py
+@@ -1,6 +1,7 @@
+ # paper/make_paper.py
+ from __future__ import annotations
+ 
+ from collections.abc import Mapping
++
+ import argparse
+ import hashlib
+ import json
+@@ -520,6 +521,193 @@ def fig_rv_stress_timeline(
+     fig.savefig(out_path, dpi=int(dpi))
+     plt.close(fig)
+ 
++
++# ----------------------------
++# Chapter 5 (core): stress observable S_t and continuous z_t
++# ----------------------------
++
++def table_stress_mask_and_z(
++    returns_csv: Path,
++    splits: dict[str, Any],
++    *,
++    asset: str = "BTC",
++    rv_window: int = 30,
++    calm_q: float = 0.50,
++    stress_q: float = 0.90,
++) -> tuple[pd.DataFrame, float, float, float, float]:
++    """
++    Build a single, reproducible stress source from returns:
++      RV_t = sqrt(sum_{i=t-w+1..t} r_i^2)
++      tau_calm   = quantile(RV_train, calm_q)
++      tau_stress = quantile(RV_train, stress_q)
++      S_t = 1{RV_t >= tau_stress}
++      z_t = (RV_t - median(RV_train)) / MAD(RV_train)   (robust, train-only)
++
++    Returns:
++      (df, tau_calm, tau_stress, med_train, mad_train)
++
++    df columns: date, RV_t, tau_calm, tau_stress, S_t, z_t
++    """
++    df = _load_csv(returns_csv)
++
++    time_col, asset_cols = _infer_returns_time_and_asset_cols(df)
++    if not asset_cols:
++        raise MissingArtifactError(f"No numeric asset columns found in returns.csv: {returns_csv}")
++
++    btc_col, eth_col = _pick_btc_eth_cols(asset_cols)
++    chosen = None
++    if asset.upper() == "BTC":
++        chosen = btc_col or (asset_cols[0] if asset_cols else None)
++    elif asset.upper() == "ETH":
++        chosen = eth_col or (asset_cols[0] if asset_cols else None)
++    else:
++        for c in asset_cols:
++            if c.lower() == asset.lower():
++                chosen = c
++                break
++        if chosen is None:
++            chosen = asset_cols[0]
++
++    if chosen is None or chosen not in df.columns:
++        raise MissingArtifactError(f"Cannot select asset column for stress driver. asset={asset} cols={asset_cols[:20]}")
++
++    # Force UTC-aware timestamps (prevents naive vs aware comparisons)
++    t = pd.to_datetime(df[time_col], utc=True, errors="coerce")
++    r = pd.to_numeric(df[chosen], errors="coerce").to_numpy(dtype=float)
++    m = np.isfinite(r) & t.notna().to_numpy()
++    t = t[m].reset_index(drop=True)
++    r = r[m]
++
++    rv = _rolling_rv_from_returns(r, window=int(rv_window))
++
++    train_start = pd.to_datetime(str(splits["train_start"]), utc=True, errors="raise")
++    first_oos = pd.to_datetime(str(splits["first_oos"]), utc=True, errors="raise")
++    last_oos = pd.to_datetime(str(splits["last_oos"]), utc=True, errors="raise")
++
++    m_train = (t >= train_start) & (t < first_oos) & np.isfinite(rv)
++    rv_train = rv[m_train.to_numpy()]
++    if rv_train.size < 50:
++        raise MissingArtifactError(f"Not enough TRAIN RV points for stress driver. Got {rv_train.size}.")
++
++    tau_calm = float(np.quantile(rv_train, float(calm_q)))
++    tau_stress = float(np.quantile(rv_train, float(stress_q)))
++
++    # binary stress
++    S_t = (rv >= tau_stress).astype(int)
++
++    # robust z_t (train-only median/MAD)
++    med = float(np.median(rv_train))
++    mad = float(np.median(np.abs(rv_train - med)))
++    if not np.isfinite(mad) or mad <= 0:
++        # deterministic fallback (avoid div-by-0); still train-only
++        s = float(np.std(rv_train))
++        mad = s if (np.isfinite(s) and s > 0) else 1.0
++    z_t = (rv - med) / mad
++
++    out = pd.DataFrame(
++        {
++            "date": pd.to_datetime(t, utc=True),
++            "RV_t": rv,
++            "tau_calm": tau_calm,
++            "tau_stress": tau_stress,
++            "S_t": S_t,
++            "z_t": z_t,
++        }
++    )
++
++    # Keep the reviewer-facing window only (train_start .. last_oos)
++    out = out[(out["date"] >= train_start) & (out["date"] <= last_oos)].reset_index(drop=True)
++
++    return out, tau_calm, tau_stress, med, mad
++
++
++def fig_stress_driver_rv_tau_S_z(
++    stress_df: pd.DataFrame,
++    out_path: Path,
++    *,
++    fig_w: float,
++    fig_h: float,
++    dpi: int,
++) -> None:
++    """Chapter 5 figure: RV_t + thresholds + stress shading + z_t panel."""
++    if stress_df.empty:
++        raise MissingArtifactError("stress_df is empty")
++    for c in ["date", "RV_t", "tau_calm", "tau_stress", "S_t", "z_t"]:
++        if c not in stress_df.columns:
++            raise MissingArtifactError(f"stress_df missing column '{c}'")
++
++    t = pd.to_datetime(stress_df["date"], utc=True, errors="coerce")
++    rv = pd.to_numeric(stress_df["RV_t"], errors="coerce").to_numpy(dtype=float)
++    z = pd.to_numeric(stress_df["z_t"], errors="coerce").to_numpy(dtype=float)
++    S = pd.to_numeric(stress_df["S_t"], errors="coerce").fillna(0).to_numpy(dtype=int)
++
++    # thresholds are constants (take first row)
++    tau_calm = float(pd.to_numeric(stress_df["tau_calm"], errors="coerce").dropna().iloc[0])
++    tau_stress = float(pd.to_numeric(stress_df["tau_stress"], errors="coerce").dropna().iloc[0])
++
++    _set_matplotlib_style(fig_w, fig_h)
++    w = max(10.0, float(fig_w))
++    h = max(6.0, float(fig_h) * 1.35)
++    fig, ax = plt.subplots(2, 1, figsize=(w, h), sharex=True)
++
++    # Top: RV + thresholds + shading
++    ax[0].plot(t, rv, linewidth=1.1)
++    ax[0].axhline(tau_calm, linestyle="--", linewidth=1.2)
++    ax[0].axhline(tau_stress, linestyle="--", linewidth=1.4)
++
++    # Shade stress periods
++    mS = (S == 1) & np.isfinite(rv)
++    idx = np.where(mS)[0]
++    if idx.size:
++        s0 = idx[0]
++        p0 = idx[0]
++        for k in idx[1:]:
++            if k == p0 + 1:
++                p0 = k
++                continue
++            ax[0].axvspan(t.iloc[s0], t.iloc[p0], alpha=0.18)
++            s0 = k
++            p0 = k
++        ax[0].axvspan(t.iloc[s0], t.iloc[p0], alpha=0.18)
++
++    ax[0].set_title("Stress driver (core): RV_t (train-only thresholds) + S_t")
++    ax[0].set_ylabel("RV_t")
++    ax[0].grid(axis="y", linestyle=":", linewidth=1.0)
++
++    # Bottom: z_t (robust)
++    ax[1].plot(t, z, linewidth=1.1)
++    ax[1].axhline(0.0, linestyle=":", linewidth=1.0)
++    ax[1].set_ylabel("z_t (robust)")
++    ax[1].set_xlabel("time (UTC)")
++    ax[1].grid(axis="y", linestyle=":", linewidth=1.0)
++
++    fig.tight_layout()
++    _ensure_dir(out_path.parent)
++    fig.savefig(out_path, dpi=int(dpi))
++    plt.close(fig)
++
+@@ -2310,6 +2498,26 @@ def main() -> int:
+     # F6: stress definition — realized volatility with train-only thresholds + stress shading
+     fig_rv_stress_timeline(
+         returns_csv,
+         splits_obj,
+         fig_out / "fig_F6_rv_stress_timeline.png",
+@@ -2323,6 +2531,25 @@ def main() -> int:
+         fig_h=fig_h,
+         dpi=dpi,
+     )
++
++    # Chapter 5 core stress source (S_t, z_t) + dedicated figure
++    stress_df, tau_calm, tau_stress, med, mad = table_stress_mask_and_z(
++        returns_csv,
++        splits_obj,
++        asset=str(out_cfg.get("rv_asset", "BTC")),
++        rv_window=int(out_cfg.get("rv_window", 30)),
++        calm_q=float(out_cfg.get("rv_calm_q", 0.50)),
++        stress_q=float(out_cfg.get("rv_stress_q", 0.90)),
++    )
++    _save_csv_stable(stress_df, tab_out / "tab_FX_stress_mask.csv", float_fmt=float_fmt, table_round=table_round)
++    fig_stress_driver_rv_tau_S_z(
++        stress_df,
++        fig_out / "fig_FX_stress_driver_rv_tau_S_z.png",
++        fig_w=fig_w,
++        fig_h=fig_h,
++        dpi=dpi,
++    )

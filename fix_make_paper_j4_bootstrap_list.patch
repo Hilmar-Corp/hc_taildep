@@ -1,0 +1,160 @@
+diff --git a/paper/make_paper.py b/paper/make_paper.py
+index 1111111..2222222 100644
+--- a/paper/make_paper.py
++++ b/paper/make_paper.py
+@@ -1,6 +1,7 @@
+ # paper/make_paper.py
+ from __future__ import annotations
+ 
++from collections.abc import Mapping
+ import argparse
+ import hashlib
+ import json
+@@
+ def _extract_j4_bootstrap_payload(j: dict[str, Any]) -> tuple[str, list[float] | None, float | None, float | None, float | None, float | None]:
+     """
+     Extract:
+       - label (definition key)
+       - samples list (Δλ^{(b)}) if stored, else None
+       - delta_obs (Δλ observed)
+       - ci_low/ci_high (if present)
+       - pvalue (if present)
+ 
+-    Supports flexible schemas under j["results"].
++    Supports flexible schemas under j["results"].
++    Accepts either:
++      - dict: { "RV": {...}, "JDown": {...} }
++      - list: [ {"definition":"RV", ...}, {"definition":"JDown", ...} ]
+     """
+     results = j.get("results", None)
+-    if not isinstance(results, Mapping) or not results:
+-        raise MissingArtifactError("taildep_bootstrap.json: missing/invalid 'results' field")
++    if results is None:
++        raise MissingArtifactError("taildep_bootstrap.json: missing 'results' field")
++
++    # normalize to a dict[str, Mapping]
++    if isinstance(results, list):
++        d: dict[str, Any] = {}
++        for item in results:
++            if isinstance(item, Mapping):
++                key = str(item.get("definition", ""))
++                if not key:
++                    key = f"def_{len(d)}"
++                d[key] = item
++        results = d
++
++    if not isinstance(results, Mapping) or not results:
++        raise MissingArtifactError("taildep_bootstrap.json: missing/invalid 'results' field")
+ 
+     # pick first definition deterministically
+     keys = sorted([str(k) for k in results.keys()])
+     k0 = keys[0]
+     obj = results.get(k0, None)
+     if not isinstance(obj, Mapping):
+         raise MissingArtifactError(f"taildep_bootstrap.json: results['{k0}'] is not a dict")
+ 
+     # find samples array
+     samples = None
+     for kk in ["delta_lambda_samples", "delta_lambda_boot", "samples", "boot", "delta_lambda_draws"]:
+         if kk in obj and isinstance(obj[kk], list):
+             samples = obj[kk]
+             break
+@@
+-    if samples is None:
+-        raise MissingArtifactError(f"taildep_bootstrap.json: cannot find bootstrap samples list in results['{k0}']")
++    # samples are OPTIONAL (some runs store only a hash)
++    if samples is None:
++        samples_list = None
++    else:
++        s = np.asarray(pd.to_numeric(pd.Series(samples), errors="coerce"), dtype=float)
++        s = s[np.isfinite(s)]
++        samples_list = s.tolist() if s.size else None
+ 
+-    # numeric cast + finite filter
+-    s = np.asarray(pd.to_numeric(pd.Series(samples), errors="coerce"), dtype=float)
+-    s = s[np.isfinite(s)]
+-    if s.size < 20:
+-        raise MissingArtifactError(f"taildep_bootstrap.json: too few finite samples ({s.size})")
+-
+     # delta observed / CI / pvalue
+     def _get_float(*names: str) -> float | None:
+         for nm in names:
+             if nm in obj:
+                 try:
+                     v = float(obj[nm])
+                     if np.isfinite(v):
+                         return v
+                 except Exception:
+                     pass
+         return None
+ 
+-    delta_obs = _get_float("delta_lambda_obs", "delta_lambda", "delta_obs")
+-    ci_low = _get_float("ci_low", "ci_lower", "ci_l", "ci025")
+-    ci_high = _get_float("ci_high", "ci_upper", "ci_h", "ci975")
+-    pvalue = _get_float("pvalue", "p_value", "p")
++    # handle both naming conventions:
++    # - delta_lambda_hat / delta_lambda_ci95 / pvalue_two_sided (J4 runner)
++    # - delta_lambda_obs / ci_low/ci_high / pvalue (generic)
++    delta_obs = _get_float("delta_lambda_obs", "delta_lambda", "delta_obs", "delta_lambda_hat")
++    ci_low = _get_float("ci_low", "ci_lower", "ci_l", "ci025")
++    ci_high = _get_float("ci_high", "ci_upper", "ci_h", "ci975")
++    if ci_low is None or ci_high is None:
++        # try packed CI list
++        if "delta_lambda_ci95" in obj and isinstance(obj["delta_lambda_ci95"], list) and len(obj["delta_lambda_ci95"]) == 2:
++            try:
++                ci_low = float(obj["delta_lambda_ci95"][0])
++                ci_high = float(obj["delta_lambda_ci95"][1])
++            except Exception:
++                pass
++    pvalue = _get_float("pvalue", "p_value", "p", "pvalue_two_sided")
+ 
+-    return (k0, s.tolist(), delta_obs, ci_low, ci_high, pvalue)
++    return (k0, samples_list, delta_obs, ci_low, ci_high, pvalue)
+ 
+@@
+ def fig_j4_delta_lambda_bootstrap_hist(
+     bootstrap_json: Path,
+     out_path: Path,
+     *,
+     fig_w: float,
+     fig_h: float,
+     dpi: int,
+ ) -> None:
+     """Figure F9: histogram of Δλ^{(b)} with marker at 0 and observed Δλ."""
+     j = json.loads(_read_text(bootstrap_json))
+     label, samples, delta_obs, ci_low, ci_high, pvalue = _extract_j4_bootstrap_payload(j)
+ 
+-    x = np.asarray(samples, dtype=float)
++    # If samples weren't stored, emit a placeholder figure (no crash).
++    if samples is None or len(samples) == 0:
++        _set_matplotlib_style(fig_w, fig_h)
++        fig, ax = plt.subplots(figsize=(max(7.8, fig_w), max(4.2, fig_h)))
++        ax.axis("off")
++        lines = [
++            "Δλ bootstrap histogram (J4)",
++            f"definition: {label}",
++            "",
++            "Bootstrap samples were not stored in taildep_bootstrap.json",
++            "(only a hash of samples exists).",
++            "",
++            f"Δ_hat: {delta_obs if delta_obs is not None else 'NA'}",
++            f"CI95: [{ci_low}, {ci_high}]" if (ci_low is not None and ci_high is not None) else "CI95: NA",
++            f"p(two-sided): {pvalue if pvalue is not None else 'NA'}",
++            "",
++            "To get the real histogram: rerun J4 with samples saved (delta_lambda_samples).",
++        ]
++        ax.text(0.02, 0.98, "\n".join(lines), ha="left", va="top", fontsize=11)
++        fig.tight_layout()
++        _ensure_dir(out_path.parent)
++        fig.savefig(out_path, dpi=int(dpi))
++        plt.close(fig)
++        return
++
++    x = np.asarray(samples, dtype=float)
+     _set_matplotlib_style(fig_w, fig_h)
+     fig, ax = plt.subplots(figsize=(max(7.8, fig_w), max(4.2, fig_h)))
+ 
+     ax.hist(x, bins=60)
+     ax.axvline(0.0, linewidth=2.0)
+     if delta_obs is not None and np.isfinite(delta_obs):
+         ax.axvline(float(delta_obs), linewidth=2.5)

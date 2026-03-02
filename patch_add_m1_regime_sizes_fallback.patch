@@ -1,0 +1,184 @@
+diff --git a/paper/make_paper.py b/paper/make_paper.py
+index 1111111..2222222 100644
+--- a/paper/make_paper.py
++++ b/paper/make_paper.py
+@@ -1,6 +1,7 @@
+ # paper/make_paper.py
+ from __future__ import annotations
+ 
++from collections.abc import Iterable
+ from collections.abc import Mapping
+ 
+ import argparse
+ import hashlib
+@@ -460,6 +461,169 @@ def fig_stress_driver_rv_tau_S_z(
+     fig.savefig(out_path, dpi=int(dpi))
+     plt.close(fig)
++
++# ----------------------------
++# Chapter 5 (M1): regime sizes + fallback rate by refit block
++# ----------------------------
++
++def _as_utc_datetime(x: Any) -> pd.Timestamp:
++    """Parse as tz-aware UTC timestamp (deterministic)."""
++    return pd.to_datetime(x, utc=True, errors="raise")
++
++
++def table_m1_regime_sizes_fallback_by_block(
++    stress_df: pd.DataFrame,
++    *,
++    n_min: int = 50,
++    refit_every: int = 63,
++    train_start: Optional[Any] = None,
++    first_oos: Optional[Any] = None,
++    last_oos: Optional[Any] = None,
++) -> pd.DataFrame:
++    """
++    Build reviewer-facing table for M1 (threshold gating):
++      - regime sizes in TRAIN at each refit date
++      - fallback flag if power constraint not met: n_calm_train>=n_min and n_stress_train>=n_min
++
++    We do NOT fit copulas here; we only audit the gating data availability.
++    """
++    if stress_df.empty:
++        raise MissingArtifactError("stress_df is empty (cannot build M1 table)")
++    for c in ["date", "S_t"]:
++        if c not in stress_df.columns:
++            raise MissingArtifactError(f"stress_df missing column '{c}'")
++
++    df = stress_df.copy()
++    df["date"] = pd.to_datetime(df["date"], utc=True, errors="coerce")
++    df = df.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
++    df["S_t"] = pd.to_numeric(df["S_t"], errors="coerce").fillna(0).astype(int)
++    df["S_t"] = (df["S_t"] != 0).astype(int)
++
++    t0 = df["date"].iloc[0]
++    t1 = df["date"].iloc[-1]
++    train_start_ts = _as_utc_datetime(train_start) if train_start is not None else t0
++    first_oos_ts = _as_utc_datetime(first_oos) if first_oos is not None else train_start_ts
++    last_oos_ts = _as_utc_datetime(last_oos) if last_oos is not None else t1
++
++    df = df[(df["date"] >= train_start_ts) & (df["date"] <= last_oos_ts)].reset_index(drop=True)
++    if df.empty:
++        raise MissingArtifactError("stress_df becomes empty after clipping to [train_start,last_oos]")
++
++    step = int(refit_every)
++    if step <= 1:
++        step = 1
++    nmin = int(n_min)
++    if nmin < 1:
++        nmin = 1
++
++    dates = df["date"].to_numpy()
++    n = len(df)
++    i0 = int(np.searchsorted(dates, first_oos_ts.to_datetime64(), side="left"))
++    if i0 < 1:
++        i0 = 1
++
++    refit_idx = list(range(i0, n, step))
++    if refit_idx and refit_idx[-1] != n - 1:
++        refit_idx.append(n - 1)
++    if not refit_idx:
++        refit_idx = [n - 1]
++
++    rows: list[dict[str, Any]] = []
++    block_id = 0
++    prev_i = i0
++    for i in refit_idx:
++        t_refit = pd.Timestamp(dates[i]).tz_convert("UTC")
++        m_train = df["date"] < t_refit
++        s_train = df.loc[m_train, "S_t"].to_numpy(dtype=int)
++        n_train = int(s_train.size)
++        n_stress_train = int((s_train == 1).sum())
++        n_calm_train = int((s_train == 0).sum())
++
++        low_power = (n_train < 2 * nmin) or (n_stress_train < nmin) or (n_calm_train < nmin)
++        reason = []
++        if n_train < 2 * nmin:
++            reason.append("n_train<2*n_min")
++        if n_stress_train < nmin:
++            reason.append("n_stress_train<n_min")
++        if n_calm_train < nmin:
++            reason.append("n_calm_train<n_min")
++        reason_s = ";".join(reason) if reason else ""
++
++        t_block_start = pd.Timestamp(dates[prev_i]).tz_convert("UTC")
++        t_block_end = t_refit
++        m_block = (df["date"] >= t_block_start) & (df["date"] <= t_block_end)
++        n_block = int(m_block.sum())
++        fallback_used = int(low_power)
++
++        rows.append(
++            {
++                "block_id": block_id,
++                "t_refit": t_refit.isoformat(),
++                "block_start": t_block_start.isoformat(),
++                "block_end": t_block_end.isoformat(),
++                "n_block_obs": n_block,
++                "n_train_obs": n_train,
++                "n_calm_train": n_calm_train,
++                "n_stress_train": n_stress_train,
++                "n_min": nmin,
++                "refit_every_obs": step,
++                "fallback_used": fallback_used,
++                "fallback_reason": reason_s,
++            }
++        )
++        block_id += 1
++        prev_i = i
++
++    return pd.DataFrame(rows)
++
++
++def fig_m1_fallback_rate_by_block(
++    m1_tbl: pd.DataFrame,
++    out_path: Path,
++    *,
++    fig_w: float,
++    fig_h: float,
++    dpi: int,
++) -> None:
++    if m1_tbl is None or m1_tbl.empty:
++        raise MissingArtifactError("m1_tbl is empty (cannot plot fallback rate)")
++    for c in ["t_refit", "fallback_used"]:
++        if c not in m1_tbl.columns:
++            raise MissingArtifactError(f"m1_tbl missing column '{c}'")
++
++    df = m1_tbl.copy()
++    t = pd.to_datetime(df["t_refit"], utc=True, errors="coerce")
++    y = pd.to_numeric(df["fallback_used"], errors="coerce").fillna(0).to_numpy(dtype=float)
++
++    _set_matplotlib_style(fig_w, fig_h)
++    plt.figure(figsize=(max(8.5, fig_w), max(3.2, fig_h * 0.85)))
++    plt.step(t, y, where="post")
++    plt.ylim(-0.05, 1.05)
++    plt.yticks([0, 1], ["0", "1"])
++    plt.title("M1 — fallback_used by refit block")
++    plt.xlabel("refit time (UTC)")
++    plt.ylabel("fallback_used")
++    plt.grid(axis="y", linestyle=":", linewidth=1.0)
++    _ensure_dir(out_path.parent)
++    plt.tight_layout()
++    plt.savefig(out_path, dpi=int(dpi))
++    plt.close()
+@@ -1184,6 +1357,26 @@ def main() -> int:
+     fig_stress_driver_rv_tau_S_z(
+         stress_df,
+         fig_out / "fig_FX_stress_driver_rv_tau_S_z.png",
+         fig_w=fig_w,
+         fig_h=fig_h,
+         dpi=dpi,
+     )
++
++    m1_n_min = int(out_cfg.get("m1_n_min", 50))
++    m1_refit_every = int(out_cfg.get("m1_refit_every", int(out_cfg.get("logscore_rolling_window", 63))))
++    m1_tbl = table_m1_regime_sizes_fallback_by_block(
++        stress_df,
++        n_min=m1_n_min,
++        refit_every=m1_refit_every,
++        train_start=splits_obj.get("train_start"),
++        first_oos=splits_obj.get("first_oos"),
++        last_oos=splits_obj.get("last_oos"),
++    )
++    _save_csv_stable(m1_tbl, tab_out / "tab_M1_regime_sizes_fallback_by_block.csv", float_fmt=float_fmt, table_round=table_round)
++    fig_m1_fallback_rate_by_block(m1_tbl, fig_out / "fig_M1_fallback_rate_by_block.png", fig_w=fig_w, fig_h=fig_h, dpi=dpi)

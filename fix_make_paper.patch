@@ -1,0 +1,37 @@
+diff --git a/paper/make_paper.py b/paper/make_paper.py
+--- a/paper/make_paper.py
++++ b/paper/make_paper.py
+@@
+ def main() -> int:
+@@
+-    # Prepare output structure
+-    fig_out = out_dir / "figures"
+-    tab_out = out_dir / "tables"
+-    _ensure_dir(fig_out)
+-    _ensure_dir(tab_out)
++    # Prepare output structure
++    fig_out = out_dir / "figures"
++    tab_out = out_dir / "tables"
++    _ensure_dir(out_dir)
++    _ensure_dir(fig_out)
++    _ensure_dir(tab_out)
+@@
+-    _write_json(out_dir / "manifest.json", manifest)
+-    _write_paper_summary(out_dir, paper_id=paper_id, runs_info=runs_info, manifest=manifest)
+-    return 0
++    _write_json(out_dir / "manifest.json", manifest)
++    _write_paper_summary(out_dir, paper_id=paper_id, runs_info=runs_info, manifest=manifest)
++
++    # ---- expected status lines (for terminal UX + CI logs) ----
++    man_p = out_dir / "manifest.json"
++    man_sha = _sha256_file(man_p) if man_p.exists() else None
++    print(f"[OK] J9 paper pack built: {out_dir}")
++    print(f"[OK] figures: {fig_out}")
++    print(f"[OK] tables: {tab_out}")
++    if man_sha is not None:
++        print(f"[OK] manifest: {man_p} sha256={man_sha}")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())

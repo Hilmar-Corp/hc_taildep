@@ -1,0 +1,189 @@
+*** Begin Patch
+*** Update File: paper/make_paper.py
+@@
+ def _set_matplotlib_style(fig_w: float, fig_h: float) -> None:
+     # Keep default colors; just enforce deterministic sizing
+     plt.rcParams["figure.figsize"] = (float(fig_w), float(fig_h))
+     plt.rcParams["savefig.dpi"] = 200
++
++
++# ----------------------------
++# M1 (threshold gating) — regime sizes + fallback rate by refit block
++# ----------------------------
++
++def table_m1_regime_sizes_fallback_by_block(
++    returns_csv: Path,
++    splits: dict[str, Any],
++    *,
++    rv_asset: str = "BTC",
++    rv_window: int = 30,
++    calm_q: float = 0.50,
++    stress_q: float = 0.90,
++    refit_every_days: int = 30,
++    n_min: int = 200,
++) -> pd.DataFrame:
++    """Table for reviewer: regime sizes + fallback flag per refit block (TRAIN-only).
++
++    For each refit time t_k in the OOS window, we compute:
++      - RV_t from returns (rolling window)
++      - train slice = [train_start, t_k)
++      - thresholds τ_calm, τ_stress computed on RV_train only
++      - counts n_calm_train, n_stress_train based on RV_train vs thresholds
++      - fallback_used = 1 if any regime has n < n_min
++
++    This is the minimal "power guardrail" audit trail for M1 gating.
++    """
++    df = _load_csv(returns_csv)
++    time_col, asset_cols = _infer_returns_time_and_asset_cols(df)
++    btc_col, eth_col = _pick_btc_eth_cols(asset_cols)
++
++    # choose RV asset column
++    rv_asset_u = str(rv_asset).upper()
++    if rv_asset_u == "BTC":
++        chosen = btc_col or (asset_cols[0] if asset_cols else None)
++    elif rv_asset_u == "ETH":
++        chosen = eth_col or (asset_cols[0] if asset_cols else None)
++    else:
++        chosen = None
++        for c in asset_cols:
++            if c.lower() == str(rv_asset).lower():
++                chosen = c
++                break
++        if chosen is None:
++            chosen = asset_cols[0] if asset_cols else None
++    if chosen is None or chosen not in df.columns:
++        raise MissingArtifactError(f"Cannot select RV asset column. rv_asset={rv_asset} cols={asset_cols[:20]}")
++
++    t = pd.to_datetime(df[time_col], utc=True, errors="coerce")
++    r = pd.to_numeric(df[chosen], errors="coerce").to_numpy(dtype=float)
++    m = np.isfinite(r) & t.notna().to_numpy()
++    t = t[m]
++    r = r[m]
++
++    rv = _rolling_rv_from_returns(r, window=int(rv_window))
++
++    train_start = pd.to_datetime(str(splits["train_start"]), utc=True, errors="raise")
++    first_oos = pd.to_datetime(str(splits["first_oos"]), utc=True, errors="raise")
++    last_oos = pd.to_datetime(str(splits["last_oos"]), utc=True, errors="raise")
++
++    # Refit schedule (calendar days, deterministic)
++    step = pd.Timedelta(days=int(refit_every_days))
++    refit_times: list[pd.Timestamp] = []
++    tk = first_oos
++    while tk <= last_oos:
++        refit_times.append(tk)
++        tk = tk + step
++    if not refit_times:
++        refit_times = [first_oos]
++
++    rows: list[dict[str, Any]] = []
++    for tk in refit_times:
++        # TRAIN slice for this block: [train_start, tk)
++        m_train = (t >= train_start) & (t < tk) & np.isfinite(rv)
++        rv_train = rv[m_train.to_numpy()] if hasattr(m_train, "to_numpy") else rv[m_train]
++
++        if rv_train.size < 50:
++            # not enough data to define regimes -> force fallback
++            tau_calm = float("nan")
++            tau_stress = float("nan")
++            n_calm = int(0)
++            n_stress = int(0)
++            fallback = 1
++        else:
++            tau_calm = float(np.quantile(rv_train, float(calm_q)))
++            tau_stress = float(np.quantile(rv_train, float(stress_q)))
++            # Regime counts on TRAIN ONLY (power guardrail)
++            n_calm = int(np.sum(rv_train <= tau_calm))
++            n_stress = int(np.sum(rv_train >= tau_stress))
++            fallback = 1 if (n_calm < int(n_min) or n_stress < int(n_min)) else 0
++
++        rows.append(
++            {
++                "refit_time": tk.isoformat(),
++                "rv_asset": str(chosen),
++                "rv_window": int(rv_window),
++                "calm_q": float(calm_q),
++                "stress_q": float(stress_q),
++                "tau_calm": tau_calm,
++                "tau_stress": tau_stress,
++                "n_train_rv": int(rv_train.size),
++                "n_calm_train": int(n_calm),
++                "n_stress_train": int(n_stress),
++                "n_min": int(n_min),
++                "fallback_used": int(fallback),
++            }
++        )
++
++    out = pd.DataFrame(rows)
++    # stable ordering
++    out["refit_time"] = out["refit_time"].astype(str)
++    out = out.sort_values(["refit_time"]).reset_index(drop=True)
++    return out
++
++
++def fig_m1_fallback_rate_by_block(
++    m1_tbl: pd.DataFrame,
++    out_path: Path,
++    *,
++    fig_w: float,
++    fig_h: float,
++    dpi: int,
++) -> None:
++    """Optional figure: fallback usage over refit blocks (only meaningful if non-zero)."""
++    if m1_tbl.empty or "fallback_used" not in m1_tbl.columns:
++        return
++    y = pd.to_numeric(m1_tbl["fallback_used"], errors="coerce").fillna(0).to_numpy(dtype=float)
++    if float(np.sum(y)) <= 0.0:
++        # nothing to show (no fallback)
++        return
++    t = pd.to_datetime(m1_tbl["refit_time"], utc=True, errors="coerce")
++    _set_matplotlib_style(fig_w, fig_h)
++    fig, ax = plt.subplots(figsize=(max(8.0, fig_w), max(3.4, fig_h * 0.85)))
++    ax.plot(t, y, marker="o", linewidth=1.4)
++    ax.set_title("M1 — fallback usage by refit block (power guardrail)")
++    ax.set_xlabel("refit time (UTC)")
++    ax.set_ylabel("fallback_used (0/1)")
++    ax.set_ylim(-0.05, 1.05)
++    ax.grid(axis="y", linestyle=":", linewidth=1.0)
++    fig.tight_layout()
++    _ensure_dir(out_path.parent)
++    fig.savefig(out_path, dpi=int(dpi))
++    plt.close(fig)
+@@
+     # F6: stress definition — realized volatility with train-only thresholds + stress shading
+     fig_rv_stress_timeline(
+         returns_csv,
+         splits_obj,
+         fig_out / "fig_F6_rv_stress_timeline.png",
+@@
+         fig_h=fig_h,
+         dpi=dpi,
+     )
++
++    # ----------------------------
++    # M1 (threshold gating) — regime sizes + fallback rate by refit block
++    # ----------------------------
++    m1_tbl = table_m1_regime_sizes_fallback_by_block(
++        returns_csv,
++        splits_obj,
++        rv_asset=str(out_cfg.get("rv_asset", "BTC")),
++        rv_window=int(out_cfg.get("rv_window", 30)),
++        calm_q=float(out_cfg.get("rv_calm_q", 0.50)),
++        stress_q=float(out_cfg.get("rv_stress_q", 0.90)),
++        refit_every_days=int(out_cfg.get("m1_refit_every_days", 30)),
++        n_min=int(out_cfg.get("m1_n_min", 200)),
++    )
++    _save_csv_stable(
++        m1_tbl,
++        tab_out / "tab_M1_regime_sizes_fallback_by_block.csv",
++        float_fmt=float_fmt,
++        table_round=table_round,
++    )
++    fig_m1_fallback_rate_by_block(
++        m1_tbl,
++        fig_out / "fig_M1_fallback_rate_by_block.png",
++        fig_w=fig_w,
++        fig_h=fig_h,
++        dpi=dpi,
++    )
+*** End Patch

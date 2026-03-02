@@ -242,7 +242,9 @@ def main() -> int:
     # Output dirs
     out_dir = Path(f"data/processed/{ds}/taildep/j4_calm_stress")
     fig_dir = out_dir / "figures"
+    tab_dir = out_dir / "tables"
     _ensure_dir(fig_dir)
+    _ensure_dir(tab_dir)
 
     # Save resolved config
     cfg_resolved = cfg
@@ -368,6 +370,18 @@ def main() -> int:
                 u, v, mask_c, mask_s, fit_lambda_fn=fit_lambda, B=B, block_len=L, seed=seed
             )
 
+            # Persist bootstrap draws for paper-level histogram (Figure F9)
+            deltas = np.asarray(deltas, dtype=float)
+            deltas = deltas[np.isfinite(deltas)]
+            samples_csv = tab_dir / f"delta_lambda_samples_{defn}.csv"
+            if deltas.size:
+                _write_csv_stable(pd.DataFrame({"delta_lambda": deltas}), samples_csv)
+                samples_csv_hash = _sha256_file(samples_csv)
+            else:
+                # still write an empty file for determinism
+                _write_csv_stable(pd.DataFrame({"delta_lambda": []}), samples_csv)
+                samples_csv_hash = _sha256_file(samples_csv)
+
             boot_item = {
                 "definition": defn,
                 "bootstrap": {"B": res.B, "block_len": res.block_len, "seed": res.seed},
@@ -375,7 +389,9 @@ def main() -> int:
                 "delta_lambda_hat": res.delta_lambda_hat,
                 "delta_lambda_ci95": [res.ci95[0], res.ci95[1]],
                 "pvalue_two_sided": res.pvalue_two_sided,
-                "delta_lambda_samples_hash_sha256": _sha256_bytes(deltas.tobytes()),
+                "delta_lambda_samples": [float(x) for x in deltas.tolist()],
+                "delta_lambda_samples_hash_sha256": samples_csv_hash,
+                "delta_lambda_samples_csv": str(samples_csv),
             }
             boot_out.append(boot_item)
 
@@ -452,6 +468,7 @@ def main() -> int:
             "taildep_summary_hash_sha256": summary_hash,
             "taildep_bootstrap_json": str(boot_json_path),
             "taildep_bootstrap_hash_sha256": boot_hash,
+            "bootstrap_samples_dir": str(tab_dir),
             "report_md": str(report_path),
             "report_hash_sha256": report_hash,
         },
